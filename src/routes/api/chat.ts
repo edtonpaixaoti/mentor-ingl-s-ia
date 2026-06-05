@@ -34,24 +34,54 @@ export const Route = createFileRoute("/api/chat")({
         }
 
         const key = process.env.LOVABLE_API_KEY;
-        if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
 
-        const gateway = createLovableAiGatewayProvider(key);
-        // Fixed: "google/gemini-3-flash-preview" does not exist
-        const model = gateway("google/gemini-2.0-flash");
-
-        const messages: ModelMessage[] = [
+        const messages = [
           { role: "system", content: SYSTEM_PROMPT },
           ...body.messages
             .filter((m) => m.role === "user" || m.role === "assistant")
             .map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         ];
 
+        // Fallback to free keyless Pollinations AI if LOVABLE_API_KEY is not defined
+        if (!key) {
+          console.log("No LOVABLE_API_KEY found, falling back to free Pollinations AI");
+          try {
+            const res = await fetch("https://text.pollinations.ai/", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages,
+                stream: true,
+                model: "openai"
+              }),
+              signal: AbortSignal.timeout(30_000)
+            });
+
+            if (!res.ok) {
+              return new Response("Free AI service returned error status", { status: res.status });
+            }
+
+            return new Response(res.body, {
+              headers: {
+                "Content-Type": "text/plain; charset=utf-8",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive"
+              }
+            });
+          } catch (err) {
+            console.error("Pollinations AI error:", err);
+            return new Response("Free AI service offline", { status: 502 });
+          }
+        }
+
+        const gateway = createLovableAiGatewayProvider(key);
+        const model = gateway("google/gemini-2.0-flash");
+
         try {
           const result = streamText({
             model,
-            messages,
-            maxOutputTokens: 1024,
+            messages: messages as ModelMessage[],
+            maxTokens: 1024,
             abortSignal: AbortSignal.timeout(30_000),
           });
           return result.toTextStreamResponse();
