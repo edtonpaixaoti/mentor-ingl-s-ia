@@ -21,6 +21,13 @@ export const Route = createFileRoute("/api/chat")({
   server: {
     handlers: {
       POST: async ({ request }) => {
+        // Validate authentication via Bearer token
+        const authHeader = request.headers.get("authorization") ?? "";
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+        if (!token) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+
         const body = (await request.json()) as Body;
         if (!Array.isArray(body.messages) || body.messages.length === 0) {
           return new Response("messages required", { status: 400 });
@@ -30,7 +37,8 @@ export const Route = createFileRoute("/api/chat")({
         if (!key) return new Response("Missing LOVABLE_API_KEY", { status: 500 });
 
         const gateway = createLovableAiGatewayProvider(key);
-        const model = gateway("google/gemini-3-flash-preview");
+        // Fixed: "google/gemini-3-flash-preview" does not exist
+        const model = gateway("google/gemini-2.0-flash");
 
         const messages: ModelMessage[] = [
           { role: "system", content: SYSTEM_PROMPT },
@@ -40,13 +48,24 @@ export const Route = createFileRoute("/api/chat")({
         ];
 
         try {
-          const result = streamText({ model, messages });
+          const result = streamText({
+            model,
+            messages,
+            maxTokens: 1024,
+            abortSignal: AbortSignal.timeout(30_000),
+          });
           return result.toTextStreamResponse();
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          const status = /429/.test(msg) ? 429 : /402/.test(msg) ? 402 : 500;
+          if (msg.includes("429") || msg.includes("rate limit")) {
+            console.warn("AI rate limit hit");
+            return new Response("Rate limit exceeded", { status: 429 });
+          }
+          if (msg.includes("402") || msg.includes("insufficient")) {
+            return new Response("Platform credits exhausted", { status: 402 });
+          }
           console.error("AI chat error:", msg);
-          return new Response(msg, { status });
+          return new Response("Internal AI error", { status: 500 });
         }
       },
     },

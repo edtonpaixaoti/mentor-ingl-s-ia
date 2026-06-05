@@ -52,7 +52,10 @@ function Onboarding() {
   const finish = async () => {
     setBusy(true);
     const { data: u } = await supabase.auth.getUser();
-    if (!u.user) return;
+    if (!u.user) {
+      setBusy(false);
+      return;
+    }
     const { error } = await supabase
       .from("profiles")
       .update({
