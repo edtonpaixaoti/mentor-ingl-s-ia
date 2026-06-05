@@ -51,7 +51,7 @@ export const Route = createFileRoute("/api/chat")({
           const result = streamText({
             model,
             messages,
-            maxTokens: 1024,
+            maxOutputTokens: 1024,
             abortSignal: AbortSignal.timeout(30_000),
           });
           return result.toTextStreamResponse();
